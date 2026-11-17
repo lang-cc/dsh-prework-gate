@@ -1,11 +1,19 @@
 /**
  * dsh-prework-gate — Host half of the bundle.
  *
- * Registers one system-prompt section that makes the agent ask first, propose a
- * plan second, and act only after the user approves. No tools, no UI, no state:
- * the section is re-assembled with every request, so it applies to every session
- * of the profile, including resumed ones.
+ * v0.2 keeps the prompt section and adds the two halves the prompt alone could
+ * not deliver:
+ * - a hard brake on write-ish tools (`lib/gate.js`), so an unplanned write is
+ *   stopped by the Host instead of a polite paragraph;
+ * - a session-scoped cleanup tool (`lib/cleanup.js`), so the agent can tidy the
+ *   temp files it produced without ever touching deliverables.
+ *
+ * No client half, no build step: everything registers through the Host context
+ * inside `apply()`, which the profile calls once per load.
  */
+
+import { createGate, createPlanTool } from './lib/gate.js'
+import { createCleanupTool, createRegistry, trackToolCalls } from './lib/cleanup.js'
 
 /** Highest-priority working rules. Positioned early (order 400) on purpose. */
 const BASE_RULES = `## 开工闸门 — 先问清、再出清单、批准后才动手（最高优先级工作规则）
@@ -23,6 +31,33 @@ const BASE_RULES = `## 开工闸门 — 先问清、再出清单、批准后才�
 
 收尾：完成后报告「做了什么 / 怎么验证的 / 还差什么」。`
 
+/** One-round grilling: ask everything you can ask now, then move on. */
+const GRILL_RULES = `## 提问方式 — 一轮问完，不要挤牙膏
+
+非平凡任务先问一轮，禁止边做边问：
+
+- 一次最多 4 个问题，全部编号，每个问题都附上你推荐的答案和一句理由；用户只需要回答「同意／改成 X」。
+- 只问查不到、只能由用户拍板的决策（目标、取舍、边界、能不能接受某个副作用）。事实类问题（版本、路径、配置值、库的用法）自己去读文件、跑只读命令、查文档，不许占问题名额。
+- 用户答完这一轮就直接进执行清单；只有新的回答打开了新的关键分叉时，才允许问第二轮。
+- 小任务（单文件、可回滚、几分钟做完）不 grill，一句话复述理解即可。
+- 不要问「你要不要我继续」这类空问题：要么问决策，要么直接干。`
+
+/** The hard brake is visible to the agent, so a denial reads as a process step. */
+const GATE_RULES = `## 硬闸门 — 未批准的写操作会被 Host 拦下
+
+- 每个新任务开始时先调用 prework_plan 登记清单：它会把闸门重新关上，并把你写的清单挂在批准对话框上。
+- 用户批准后，本任务的后续写操作自动放行；换任务时再调一次 prework_plan 就会重新上闸。
+- 没有批准时，write / edit / apply_patch / plugin_manager 会被拦下并弹确认框。被拦不是故障：回到「讲清楚 → 拿批准」，不要绕道用 ops_bash 或其它工具偷偷改文件。
+- 只读操作、todo_write、prework_plan、postwork_cleanup 不受闸门影响。`
+
+/** Cleanup contract: what may go, what must stay, what to report. */
+const CLEANUP_RULES = `## 收尾 — 交付后清掉本轮垃圾
+
+- 任务交付、验收通过后，调用 postwork_cleanup 清掉本轮产生的临时文件、日志、构建残留、临时脚本。它只动临时产物，交付物、备份、.git、用户数据会被自动列为保留。
+- 先报告「删了什么、留了什么、为什么留」，不要静默删除；验收没通过的备份先留着，等用户确认再清。
+- 交付物永不删除，哪怕它看起来像中间产物；不要移动用户文件的位置，只清理垃圾。
+- 清理与交付分开说：交付物清单在前，清理结果在后。`
+
 /** Per-mode strength of the gate. */
 const MODES = {
   adaptive: `当前力度：自适应。
@@ -38,8 +73,8 @@ const MODES = {
 }
 
 /**
- * Register the gate section.
- * @param ctx - Host plugin context (needs `systemPrompt`).
+ * Register the gate section, the brake, and the cleanup tool.
+ * @param ctx - Host plugin context (needs `systemPrompt`, optionally `tools` / `approval`).
  * @param config - Row config from `cordis.patch.yml`.
  */
 export function apply(ctx, config) {
@@ -51,8 +86,29 @@ export function apply(ctx, config) {
   const extraRules = Array.isArray(options.extraRules)
     ? options.extraRules.filter((rule) => typeof rule === 'string' && rule.trim().length > 0)
     : []
+  const grill = options.grill !== false
+  const gateEnabled = options.gate !== false
+  const cleanupEnabled = options.cleanup !== false
+
+  const toolsAvailable = ctx.tools !== undefined && typeof ctx.tools.register === 'function'
+  const gate = gateEnabled ? createGate(ctx, {
+    gatedTools: options.gatedTools,
+    approvalTtlMinutes: options.approvalTtlMinutes,
+  }) : undefined
+  const registry = cleanupEnabled ? createRegistry() : undefined
+
+  if (toolsAvailable && gate !== undefined) {
+    ctx.tools.register(createPlanTool(gate))
+  }
+  if (toolsAvailable && registry !== undefined) {
+    trackToolCalls(ctx, registry)
+    ctx.tools.register(createCleanupTool(registry, { maxDelete: options.maxCleanupPerRun }))
+  }
 
   const parts = [BASE_RULES, mode]
+  if (grill) parts.push(GRILL_RULES)
+  if (gateEnabled) parts.push(GATE_RULES)
+  if (cleanupEnabled) parts.push(CLEANUP_RULES)
   if (extraRules.length > 0) {
     parts.push(['补充规则：', ...extraRules.map((rule) => `- ${rule.trim()}`)].join('\n'))
   }
@@ -64,5 +120,5 @@ export function apply(ctx, config) {
   })
 }
 
-/** Only the prompt registry is required; stay inactive when it is absent. */
+/** The prompt registry is required; tools and approval are probed at apply time. */
 export const inject = ['systemPrompt']

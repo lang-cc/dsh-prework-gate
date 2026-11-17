@@ -1,8 +1,8 @@
 {
   "name": "dsh-prework-gate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Ask first: clarify requirements, propose a plan, then wait for approval before changing anything.",
+  "description": "Ask first, plan second, act third: a prompt gate plus a real brake on write tools, with one-round grilling and a postwork cleanup tool.",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -10,8 +10,13 @@
     "dsh",
     "plugin",
     "prompt",
-    "workflow"
+    "workflow",
+    "approval",
+    "cleanup"
   ],
+  "scripts": {
+    "test": "node test/run.mjs"
+  },
   "exports": {
     ".": "./index.js",
     "./locale/*.json": "./locale/*.json",
@@ -19,11 +24,13 @@
   },
   "files": [
     "index.js",
+    "lib",
     "cordis.patch.yml",
     "locale/*.json",
     "docs",
     "icon.svg",
     "README.md",
+    "README.zh.md",
     "LICENSE"
   ],
   "dsh": {

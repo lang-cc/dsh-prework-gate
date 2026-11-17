@@ -1,5 +1,6 @@
 # Inserts this bundle's Host plugin row into the profile.
-# Toggle with `enabled: false`, or override `order` / `strictness` / `extraRules`.
+# Toggle with `enabled: false`; tune the brake, the grilling round and the
+# cleanup tool from the `config` block below.
 - insert:
     - id: prework-gate
       name: 'dsh-prework-gate'
@@ -8,3 +9,9 @@
         order: 400
         strictness: strict
         extraRules: []
+        grill: true
+        gate: true
+        gatedTools: []
+        approvalTtlMinutes: 120
+        cleanup: true
+        maxCleanupPerRun: 50
