@@ -96,9 +96,12 @@ deliverables surviving.
 
 ## Limitations
 
-- The brake only works when `ctx.get('approval')` is available. Without an
-  approval surface (or outside an open turn) it **fails open**, so a missing
-  dialog cannot brick every write in the profile.
+- The brake only prompts when the approval service exists *and* the session's
+  approval policy is `ask`. Under `never` — the shipped `danger-full-access`
+  preset — it **lifts the brake**, because a dialog that can never grant
+  approval would just turn every write into a denial. Switch Permissions to
+  `workspace-write` (policy `ask`) to see it work. A missing approval surface or
+  a call outside an open turn also fails open.
 - Only listed tools are gated: `ops_bash` is not on the list by default (it would
   prompt on every command); add patterns through `gatedTools`.
 - Cleanup only sees paths this session registered plus explicit `paths`; it never

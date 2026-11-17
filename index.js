@@ -90,10 +90,22 @@ export function apply(ctx, config) {
   const gateEnabled = options.gate !== false
   const cleanupEnabled = options.cleanup !== false
 
-  const toolsAvailable = ctx.tools !== undefined && typeof ctx.tools.register === 'function'
+  // `approval` stays optional: capture it in its own inject scope so the gate
+  // can ask when the service exists and fail open when it does not. Reading an
+  // undeclared service straight off `ctx` throws in Cordis, so never do that.
+  let approvalScope
+  ctx.inject(['approval'], (scope) => {
+    approvalScope = scope
+    return () => {
+      approvalScope = undefined
+    }
+  })
+
+  const toolsAvailable = typeof ctx.tools?.register === 'function'
   const gate = gateEnabled ? createGate(ctx, {
     gatedTools: options.gatedTools,
     approvalTtlMinutes: options.approvalTtlMinutes,
+    approval: () => (approvalScope === undefined ? undefined : approvalScope.approval),
   }) : undefined
   const registry = cleanupEnabled ? createRegistry() : undefined
 
@@ -120,5 +132,5 @@ export function apply(ctx, config) {
   })
 }
 
-/** The prompt registry is required; tools and approval are probed at apply time. */
-export const inject = ['systemPrompt']
+/** The prompt registry and the tool registry are required; approval is optional. */
+export const inject = ['systemPrompt', 'tools']

@@ -43,11 +43,18 @@ function validateSchemaSubset(node, label, problems) {
   if (node.items !== undefined) validateSchemaSubset(node.items, `${label}[]`, problems)
 }
 
-function makeHost({ approval = 'allowed-once' } = {}) {
+function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'ask' } = {}) {
   const sections = []
   const tools = new Map()
   const listeners = new Map()
   const approvalRequests = []
+  const approvalService = {
+    request: async (request) => {
+      approvalRequests.push(request)
+      return approval
+    },
+    policyFor: () => policy,
+  }
   const ctx = {
     systemPrompt: { section: (section) => sections.push(section) },
     tools: { register: (definition) => { tools.set(definition.name, definition) } },
@@ -56,14 +63,12 @@ function makeHost({ approval = 'allowed-once' } = {}) {
       bucket.push(listener)
       listeners.set(event, bucket)
     },
-    get: (key) => (key === 'approval'
-      ? {
-        request: async (request) => {
-          approvalRequests.push(request)
-          return approval
-        },
-      }
-      : undefined),
+    // Cordis inject scope: the callback only runs once the service exists.
+    inject: (deps, callback) => {
+      if (deps.includes('approval') && !withApproval) return () => {}
+      const scope = { ...ctx, approval: approvalService }
+      return callback(scope)
+    },
   }
   const call = async (event, ...args) => {
     const bucket = listeners.get(event) ?? []
@@ -144,6 +149,26 @@ check('non-gated tools never ask', async () => {
   for (const name of ['todo_write', 'read', 'ops_bash', 'prework_plan', 'postwork_cleanup']) {
     assert.deepEqual(await host.call('tools/pre-execute', { name, agent, arguments: {} }), { kind: 'allow' })
   }
+  assert.equal(host.approvalRequests.length, 0)
+})
+
+check('approval policy never lifts the brake instead of denying everything', async () => {
+  const host = makeHost({ policy: 'never' })
+  apply(host.ctx, {})
+  const agent = { session: {} }
+  const decision = await host.call('tools/pre-execute', { name: 'write', agent, arguments: {} })
+  assert.deepEqual(decision, { kind: 'allow' })
+  assert.equal(host.approvalRequests.length, 0, 'no dialog under policy never')
+  // The same session keeps running without a second policy probe storm.
+  await host.call('tools/pre-execute', { name: 'edit', agent, arguments: {} })
+  assert.equal(host.approvalRequests.length, 0)
+})
+
+check('no approval service means fail open, not a stuck profile', async () => {
+  const host = makeHost({ withApproval: false })
+  apply(host.ctx, {})
+  const decision = await host.call('tools/pre-execute', { name: 'write', agent: {}, arguments: {} })
+  assert.deepEqual(decision, { kind: 'allow' })
   assert.equal(host.approvalRequests.length, 0)
 })
 
