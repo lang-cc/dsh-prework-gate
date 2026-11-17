@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" role="img" aria-label="Prework gate">
+  <rect x="0.5" y="0.5" width="35" height="35" rx="8" fill="#1b1e24" stroke="#3a4150"/>
+  <path d="M8 27V15.5A4.5 4.5 0 0 1 12.5 11h11A4.5 4.5 0 0 1 28 15.5V27" fill="none" stroke="#c9d3e4" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M18 7v20" stroke="#f0b24a" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M14 21.5 17 25l5.5-6" fill="none" stroke="#6ee7a8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

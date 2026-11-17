@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Prework gate",
+    "description": "Makes the agent ask for requirements, propose a plan, and wait for approval before changing anything.",
+    "detail": "docs/DETAIL.md"
+  }
+}

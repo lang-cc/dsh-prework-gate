@@ -1,0 +1,10 @@
+# Inserts this bundle's Host plugin row into the profile.
+# Toggle with `enabled: false`, or override `order` / `strictness` / `extraRules`.
+- insert:
+    - id: prework-gate
+      name: 'dsh-prework-gate'
+      config:
+        enabled: true
+        order: 400
+        strictness: adaptive
+        extraRules: []
