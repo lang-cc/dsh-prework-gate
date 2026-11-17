@@ -6,5 +6,5 @@
       config:
         enabled: true
         order: 400
-        strictness: adaptive
+        strictness: strict
         extraRules: []
