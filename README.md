@@ -13,7 +13,7 @@ Four parts:
    ask *now* — at most four numbered questions, each with a recommended answer —
    then goes straight to the list instead of dripping questions one per turn.
 3. **Hard brake** (`lib/gate.js`): an unapproved `write` / `edit` / `apply_patch`
-   / `plugin_manager` call is stopped by the Host's `tools/pre-execute` gate and
+   call is stopped by the Host's `tools/pre-execute` gate and
    routed through the approval dialog. One approval unlocks the rest of the task;
    the next task re-arms it.
 4. **Postwork cleanup** (`lib/cleanup.js`): the `postwork_cleanup` tool sends this

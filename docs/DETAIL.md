@@ -22,7 +22,7 @@
 `tools/pre-execute` 是工具管线的有序 allow/deny/ask 闸口。插件在它上面挂一个监听器：
 
 - 先 `await next()`，让沙箱策略和其它插件先决定；它们已经拒绝就原样返回。
-- 只处理名单内的工具（默认 `write`、`edit`、`apply_patch`、`plugin_manager`、`str_replace*`、`multiedit`、`notebook_edit`、`create_file`、`move_file`、`delete_file`），`todo_write`、`prework_plan`、`postwork_cleanup` 永久放行，`ops_bash` 默认不拦（否则每条命令都弹框）。
+- 只处理名单内的工具（默认 `write`、`edit`、`apply_patch`、`str_replace*`、`multiedit`、`notebook_edit`、`create_file`、`move_file`、`delete_file`），`todo_write`、`prework_plan`、`postwork_cleanup` 永久放行；`plugin_manager` 故意不拦（它是插件出问题时的恢复通道，拦了就没法重载或关掉自己），`ops_bash` 默认也不拦（否则每条命令都弹框）。
 - 该 agent 还没有批准过 → 调 `ctx.approval.request({ agent, toolName, callId, reason, displayReason, signal })`，把 `prework_plan` 登记的清单作为 `displayReason` 显示在批准框里。
 - 返回 `allowed-once` → 标记本任务已放行（默认 120 分钟后自动失效）；`rejected` → 返回 `{ kind: 'deny', reason }`，模型收到一条“回到讲清楚拿批准”的错误；`cancelled` → 返回 `{ kind: 'cancel' }`。
 - 审批通道不可用（没有 answerer、turn 已关闭、服务不存在）→ **放行**。宁可漏拦，也不要把整个 profile 的写操作卡死。

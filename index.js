@@ -47,7 +47,7 @@ const GATE_RULES = `## 硬闸门 — 未批准的写操作会被 Host 拦下
 
 - 每个新任务开始时先调用 prework_plan 登记清单：它会把闸门重新关上，并把你写的清单挂在批准对话框上。
 - 用户批准后，本任务的后续写操作自动放行；换任务时再调一次 prework_plan 就会重新上闸。
-- 没有批准时，write / edit / apply_patch / plugin_manager 会被拦下并弹确认框。被拦不是故障：回到「讲清楚 → 拿批准」，不要绕道用 ops_bash 或其它工具偷偷改文件。
+- 没有批准时，write / edit / apply_patch 会被拦下并弹确认框（plugin_manager 不拦：它是出问题时的恢复通道）。被拦不是故障：回到「讲清楚 → 拿批准」，不要绕道用 ops_bash 或其它工具偷偷改文件。
 - 只读操作、todo_write、prework_plan、postwork_cleanup 不受闸门影响。`
 
 /** Cleanup contract: what may go, what must stay, what to report. */

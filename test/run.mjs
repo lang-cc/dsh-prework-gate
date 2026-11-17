@@ -146,7 +146,7 @@ check('non-gated tools never ask', async () => {
   const host = makeHost()
   apply(host.ctx, {})
   const agent = {}
-  for (const name of ['todo_write', 'read', 'ops_bash', 'prework_plan', 'postwork_cleanup']) {
+  for (const name of ['todo_write', 'read', 'ops_bash', 'prework_plan', 'postwork_cleanup', 'plugin_manager']) {
     assert.deepEqual(await host.call('tools/pre-execute', { name, agent, arguments: {} }), { kind: 'allow' })
   }
   assert.equal(host.approvalRequests.length, 0)
