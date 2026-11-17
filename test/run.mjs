@@ -53,7 +53,7 @@ function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'as
       approvalRequests.push(request)
       return approval
     },
-    policyFor: () => policy,
+    effectivePolicy: () => policy,
   }
   const ctx = {
     systemPrompt: { section: (section) => sections.push(section) },
