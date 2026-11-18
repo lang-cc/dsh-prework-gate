@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Prework gate",
-    "description": "Clarify, plan, wait for approval, then act - unapproved writes are blocked, and the session's temp files are swept after delivery.",
+    "description": "Clarify, plan, wait for approval, then act - unapproved writes are blocked, and only temp files created by this session are swept after delivery.",
     "detail": "docs/DETAIL.md"
   }
 }

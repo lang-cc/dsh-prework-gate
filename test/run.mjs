@@ -1,18 +1,23 @@
 /**
- * test/run.mjs — dependency-free smoke test for the Host half.
+ * test/run.mjs — dependency-free smoke and boundary tests for the Host half.
  *
  * Run with `node test/run.mjs`. It builds a fake Host context (no DSH install
- * needed), exercises the prompt section, both tools, the brake, and the cleanup
- * classifier, then prints one line per check.
+ * needed) and exercises prompt assembly, per-turn approval state, command
+ * classification, cleanup classification, tracking, and cleanup execution.
  */
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
 import { apply } from '../index.js'
-import { createRegistry, createCleanupTool, classify } from '../lib/cleanup.js'
+import { isReadOnlyShell } from '../lib/gate.js'
+import {
+  classify,
+  createCleanupTool,
+  createRegistry,
+} from '../lib/cleanup.js'
 
 const checks = []
 const check = (name, fn) => checks.push({ name, fn })
@@ -33,8 +38,10 @@ function validateSchemaSubset(node, label, problems) {
   if (node.type !== undefined && !TYPES.has(node.type)) problems.push(`${label}: bad type ${String(node.type)}`)
   if (node.required !== undefined) {
     if (!Array.isArray(node.required)) problems.push(`${label}: required must be an array`)
-    else for (const name of node.required) if (node.properties === undefined || !Object.hasOwn(node.properties, name)) {
-      problems.push(`${label}: required "${name}" is not declared`)
+    else for (const name of node.required) {
+      if (node.properties === undefined || !Object.hasOwn(node.properties, name)) {
+        problems.push(`${label}: required "${name}" is not declared`)
+      }
     }
   }
   if (node.properties !== undefined) {
@@ -48,16 +55,18 @@ function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'as
   const tools = new Map()
   const listeners = new Map()
   const approvalRequests = []
+  const warnings = []
   const approvalService = {
     request: async (request) => {
       approvalRequests.push(request)
-      return approval
+      return typeof approval === 'function' ? approval(request) : approval
     },
     effectivePolicy: () => policy,
   }
   const ctx = {
     systemPrompt: { section: (section) => sections.push(section) },
     tools: { register: (definition) => { tools.set(definition.name, definition) } },
+    logger: { warn: (message) => warnings.push(message) },
     on: (event, listener) => {
       const bucket = listeners.get(event) ?? []
       bucket.push(listener)
@@ -80,10 +89,17 @@ function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'as
     }
     return handler()
   }
-  return { ctx, sections, tools, approvalRequests, call }
+  const emit = (event, ...args) => {
+    for (const listener of listeners.get(event) ?? []) listener(...args)
+  }
+  return { ctx, sections, tools, approvalRequests, warnings, call, emit }
 }
 
-check('section text carries all four rule blocks', () => {
+function makeAgent(session = {}) {
+  return { session }
+}
+
+check('section text carries all rule blocks', () => {
   const host = makeHost()
   apply(host.ctx, { strictness: 'strict' })
   assert.equal(host.sections.length, 1)
@@ -95,12 +111,13 @@ check('section text carries all four rule blocks', () => {
   }
 })
 
-check('optional blocks and extra rules', () => {
+check('optional blocks and extra rules keep their intended toggles', () => {
   const host = makeHost()
   apply(host.ctx, { grill: false, gate: false, cleanup: false, extraRules: ['删除前先列绝对路径', ''] })
   const text = host.sections[0].text
   assert.ok(!text.includes('一轮问完'))
-  assert.ok(!text.includes('硬闸门'))
+  assert.ok(!text.includes('未批准的写操作'))
+  assert.ok(!text.includes('收尾 — 交付后清掉本轮垃圾'))
   assert.ok(text.includes('删除前先列绝对路径'))
 })
 
@@ -121,96 +138,148 @@ check('plan tool closes the gate and prints the checklist', async () => {
   const host = makeHost()
   apply(host.ctx, {})
   const plan = host.tools.get('prework_plan')
-  const agent = {}
-  const value = await plan.execute({ summary: '加清理工具', steps: ['写 lib/cleanup.js', '装回 profile'] }, { agent })
+  const value = await plan.execute(
+    { summary: '升级闸门', steps: ['修改 gate.js', '更新测试'] },
+    { agent: makeAgent() },
+  )
   assert.equal(value.recorded, true)
   assert.equal(value.gate, 'closed')
-  assert.ok(value.plan.includes('1. 写 lib/cleanup.js'))
+  assert.ok(value.plan.includes('1. 修改 gate.js'))
+  assert.ok(value.note.includes('批准只在本轮任务内有效'))
   const rendered = plan.output.render({}, value)
   assert.equal(rendered[0].type, 'text')
 })
 
-check('brake asks once, then lets the task through', async () => {
+check('one approval unlocks the turn and a new turn re-arms the gate', async () => {
   const host = makeHost({ approval: 'allowed-once' })
   apply(host.ctx, {})
-  const agent = {}
+  const agent = makeAgent()
   const write = { name: 'write', agent, arguments: { path: 'a.txt' } }
-  assert.deepEqual(await host.call('tools/pre-execute', write), { kind: 'allow' })
+
+  await host.call('tools/pre-execute', write)
   assert.equal(host.approvalRequests.length, 1)
-  assert.ok(host.approvalRequests[0].reason.includes('开工闸门'))
-  assert.deepEqual(await host.call('tools/pre-execute', { ...write, arguments: { path: 'b.txt' } }), { kind: 'allow' })
-  assert.equal(host.approvalRequests.length, 1, 'second write must not ask again')
+  await host.call('tools/pre-execute', { ...write, arguments: { path: 'b.txt' } })
+  assert.equal(host.approvalRequests.length, 1, 'second write in the same turn must not ask again')
+
+  host.emit('session/event', agent.session, { type: 'turn/start', data: { turn: 2 } })
+  await host.call('tools/pre-execute', { ...write, arguments: { path: 'c.txt' } })
+  assert.equal(host.approvalRequests.length, 2, 'a new turn must re-arm without model cooperation')
 })
 
-check('non-gated tools never ask', async () => {
-  const host = makeHost()
+check('plan tool re-arms even inside the same turn', async () => {
+  const host = makeHost({ approval: 'allowed-once' })
   apply(host.ctx, {})
-  const agent = {}
-  for (const name of ['todo_write', 'read', 'ops_bash', 'prework_plan', 'postwork_cleanup', 'plugin_manager']) {
-    assert.deepEqual(await host.call('tools/pre-execute', { name, agent, arguments: {} }), { kind: 'allow' })
-  }
-  assert.equal(host.approvalRequests.length, 0)
-})
-
-check('approval policy never lifts the brake instead of denying everything', async () => {
-  const host = makeHost({ policy: 'never' })
-  apply(host.ctx, {})
-  const agent = { session: {} }
-  const decision = await host.call('tools/pre-execute', { name: 'write', agent, arguments: {} })
-  assert.deepEqual(decision, { kind: 'allow' })
-  assert.equal(host.approvalRequests.length, 0, 'no dialog under policy never')
-  // The same session keeps running without a second policy probe storm.
-  await host.call('tools/pre-execute', { name: 'edit', agent, arguments: {} })
-  assert.equal(host.approvalRequests.length, 0)
-})
-
-check('no approval service means fail open, not a stuck profile', async () => {
-  const host = makeHost({ withApproval: false })
-  apply(host.ctx, {})
-  const decision = await host.call('tools/pre-execute', { name: 'write', agent: {}, arguments: {} })
-  assert.deepEqual(decision, { kind: 'allow' })
-  assert.equal(host.approvalRequests.length, 0)
-})
-
-check('rejected approval turns into a denial', async () => {
-  const host = makeHost({ approval: 'rejected' })
-  apply(host.ctx, {})
-  const decision = await host.call('tools/pre-execute', { name: 'edit', agent: {}, arguments: {} })
-  assert.equal(decision.kind, 'deny')
-  assert.ok(decision.reason.includes('没有批准'))
-})
-
-check('plan tool re-arms the brake for the next task', async () => {
-  const host = makeHost()
-  apply(host.ctx, {})
-  const agent = {}
+  const agent = makeAgent()
   const write = { name: 'write', agent, arguments: {} }
   await host.call('tools/pre-execute', write)
   assert.equal(host.approvalRequests.length, 1)
   await host.tools.get('prework_plan').execute({ summary: '第二个任务' }, { agent })
   await host.call('tools/pre-execute', write)
-  assert.equal(host.approvalRequests.length, 2, 'a new plan must re-open the gate')
+  assert.equal(host.approvalRequests.length, 2)
 })
 
-check('cleanup classifies temp, backups, deliverables and junk correctly', () => {
+check('a stale pending approval cannot approve a newly armed plan', async () => {
+  let resolveApproval
+  const host = makeHost({ approval: () => new Promise((resolve) => { resolveApproval = resolve }) })
+  apply(host.ctx, { gateMode: 'enforce' })
+  const agent = makeAgent()
+  const write = { name: 'write', agent, arguments: {} }
+  const pending = host.call('tools/pre-execute', write)
+  await new Promise((resolve) => setImmediate(resolve))
+  await host.tools.get('prework_plan').execute({ summary: '同一个回合的新计划' }, { agent })
+  resolveApproval('allowed-once')
+  const decision = await pending
+  assert.equal(decision.kind, 'deny', 'old approval must not unlock the new plan')
+  assert.ok(decision.reason.includes('旧批准已失效'))
+})
+
+check('approval policy never follows gateMode', async () => {
+  const promptFirst = makeHost({ policy: 'never' })
+  apply(promptFirst.ctx, {})
+  const agent = makeAgent()
+  const decision = await promptFirst.call('tools/pre-execute', { name: 'write', agent, arguments: {} })
+  assert.deepEqual(decision, { kind: 'allow' })
+  assert.equal(promptFirst.approvalRequests.length, 0)
+
+  const enforce = makeHost({ policy: 'never' })
+  apply(enforce.ctx, { gateMode: 'enforce' })
+  const denied = await enforce.call('tools/pre-execute', { name: 'write', agent: makeAgent(), arguments: {} })
+  assert.equal(denied.kind, 'deny')
+  assert.ok(denied.reason.includes('never'))
+})
+
+check('no approval service fails open in prompt-first and closed in enforce', async () => {
+  const open = makeHost({ withApproval: false })
+  apply(open.ctx, {})
+  const openDecision = await open.call('tools/pre-execute', { name: 'write', agent: makeAgent(), arguments: {} })
+  assert.deepEqual(openDecision, { kind: 'allow' })
+
+  const closed = makeHost({ withApproval: false })
+  apply(closed.ctx, { gateMode: 'enforce' })
+  const closedDecision = await closed.call('tools/pre-execute', { name: 'write', agent: makeAgent(), arguments: {} })
+  assert.equal(closedDecision.kind, 'deny')
+  assert.ok(closedDecision.reason.includes('审批通道不可用'))
+
+  const noAgent = makeHost()
+  apply(noAgent.ctx, { gateMode: 'enforce' })
+  const noAgentDecision = await noAgent.call('tools/pre-execute', { name: 'write', arguments: {} })
+  assert.equal(noAgentDecision.kind, 'deny')
+  assert.ok(noAgentDecision.reason.includes('Agent 上下文'))
+})
+
+check('rejected and cancelled approvals do not open the gate', async () => {
+  const rejected = makeHost({ approval: 'rejected' })
+  apply(rejected.ctx, {})
+  const denied = await rejected.call('tools/pre-execute', { name: 'edit', agent: makeAgent(), arguments: {} })
+  assert.equal(denied.kind, 'deny')
+  assert.ok(denied.reason.includes('没有批准'))
+
+  const cancelled = makeHost({ approval: 'cancelled' })
+  apply(cancelled.ctx, {})
+  const cancelledDecision = await cancelled.call('tools/pre-execute', { name: 'edit', agent: makeAgent(), arguments: {} })
+  assert.deepEqual(cancelledDecision, { kind: 'cancel' })
+})
+
+check('read-only shell commands bypass while side-effecting commands are gated', async () => {
+  assert.equal(isReadOnlyShell({ command: 'git status --short' }), true)
+  assert.equal(isReadOnlyShell({ command: 'git branch --show-current' }), true)
+  assert.equal(isReadOnlyShell({ command: 'ls -la' }), true)
+  assert.equal(isReadOnlyShell({ command: 'Get-Content README.md' }), true)
+  assert.equal(isReadOnlyShell({ command: 'git diff --output=trace.diff' }), false)
+  assert.equal(isReadOnlyShell({ command: 'git diff --output trace.diff' }), false)
+  assert.equal(isReadOnlyShell({ command: 'rm -rf build' }), false)
+  assert.equal(isReadOnlyShell({ command: 'echo hi > note.txt' }), false)
+  assert.equal(isReadOnlyShell({ script_path: 'build.sh', command: '' }), false)
+
+  const host = makeHost()
+  apply(host.ctx, {})
+  const agent = makeAgent()
+  await host.call('tools/pre-execute', { name: 'ops_bash', agent, arguments: { command: 'git status --short' } })
+  assert.equal(host.approvalRequests.length, 0)
+  await host.call('tools/pre-execute', { name: 'ops_bash', agent, arguments: { command: 'rm -rf build' } })
+  assert.equal(host.approvalRequests.length, 1)
+})
+
+check('cleanup only auto-removes files explicitly created in temp directories', () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), 'pg-test-'))
   const tempFile = path.join(temp, 'scratch.tmp')
-  const backupFile = path.join(temp, 'index.js.bak-20261117')
+  const backupFile = path.join(temp, 'index.js.bak-20261118')
   const notesFile = path.join(temp, 'notes.md')
   writeFileSync(tempFile, 'x')
   writeFileSync(backupFile, 'x')
   writeFileSync(notesFile, 'x')
   try {
-    assert.equal(classify(tempFile, undefined, new Set()).grade, 'auto')
-    assert.equal(classify(backupFile, undefined, new Set()).reason, '备份文件，验收前先留着')
-    assert.equal(classify(tempFile, undefined, new Set([tempFile])).grade, 'protect')
-    // A file inside the temp root is disposable whatever its name.
-    assert.equal(classify(notesFile, { via: 'write' }, new Set()).grade, 'auto')
-    // A workspace file made by a write tool is not: it may be the deliverable.
+    assert.equal(classify(tempFile, { kind: 'created' }, new Set()).grade, 'auto')
+    assert.equal(classify(tempFile, undefined, new Set()).grade, 'ask')
+    assert.equal(classify(tempFile, { kind: 'supplied', supplied: true }, new Set()).grade, 'ask')
+    assert.equal(classify(backupFile, { kind: 'created' }, new Set()).grade, 'ask')
+    assert.equal(classify(tempFile, { kind: 'created' }, new Set([tempFile])).grade, 'protect')
+
     const workspaceProbe = path.join(process.cwd(), 'test', '.probe-workspace.md')
     writeFileSync(workspaceProbe, 'x')
     try {
-      assert.equal(classify(workspaceProbe, { via: 'write' }, new Set()).grade, 'ask')
+      assert.equal(classify(workspaceProbe, { kind: 'created' }, new Set()).grade, 'ask')
+      assert.equal(classify(workspaceProbe, { kind: 'modified' }, new Set()).grade, 'ask')
     } finally {
       rmSync(workspaceProbe, { force: true })
     }
@@ -220,32 +289,31 @@ check('cleanup classifies temp, backups, deliverables and junk correctly', () =>
   }
 })
 
-check('cleanup tool dry-run reports without deleting', async () => {
+check('cleanup dry-run reports supplied paths without deleting them', async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), 'pg-test-'))
   const file = path.join(temp, 'leftover.log')
   writeFileSync(file, 'x')
   const registry = createRegistry()
-  const agent = {}
-  registry.record(agent, file, 'write')
+  const agent = makeAgent()
   const tool = createCleanupTool(registry)
   try {
     const value = await tool.execute({ dryRun: true, paths: [file] }, { agent })
     assert.equal(value.deleted.length, 0)
     assert.equal(value.scanned, 1)
-    assert.ok(value.kept.some((item) => item.reason.includes('dryRun')))
+    assert.ok(value.kept.some((item) => item.reason.includes('调用方补充')))
     assert.ok(existsSync(file), 'dry run must not delete')
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }
 })
 
-check('cleanup tool removes a temp file for real', async () => {
+check('cleanup removes a created temp file for real and reports it', async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), 'pg-test-'))
   const file = path.join(temp, 'build.cache.tmp')
   writeFileSync(file, 'x')
   const registry = createRegistry()
-  const agent = {}
-  registry.record(agent, file, 'write')
+  const agent = makeAgent()
+  registry.record(agent, file, 'write', 'created')
   const tool = createCleanupTool(registry)
   try {
     const value = await tool.execute({}, { agent })
@@ -256,16 +324,19 @@ check('cleanup tool removes a temp file for real', async () => {
   }
 })
 
-check('present marks deliverables that cleanup will not touch', async () => {
+check('present marks a deliverable and cleanup will not touch it', async () => {
   const host = makeHost()
   apply(host.ctx, {})
   const temp = mkdtempSync(path.join(os.tmpdir(), 'pg-test-'))
   const deliverable = path.join(temp, 'plugin.zip')
   writeFileSync(deliverable, 'x')
-  const agent = {}
+  const agent = makeAgent()
   try {
-    await host.call('tools/post-execute', { name: 'write', agent, arguments: { path: deliverable } }, {})
-    await host.call('tools/post-execute', { name: 'present', agent, arguments: { files: [deliverable] } }, {})
+    const writeExec = { name: 'write', agent, arguments: { path: deliverable } }
+    const presentExec = { name: 'present', agent, arguments: { files: [deliverable] } }
+    await host.call('tools/pre-execute', writeExec)
+    await host.call('tools/post-execute', writeExec, {})
+    await host.call('tools/post-execute', presentExec, {})
     const value = await host.tools.get('postwork_cleanup').execute({}, { agent })
     assert.deepEqual(value.deleted, [])
     assert.ok(value.kept.some((item) => item.reason === '交付物'))
@@ -273,6 +344,77 @@ check('present marks deliverables that cleanup will not touch', async () => {
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }
+})
+
+check('successful writes are tracked and failed writes are not', async () => {
+  const host = makeHost()
+  apply(host.ctx, {})
+  const temp = mkdtempSync(path.join(os.tmpdir(), 'pg-test-'))
+  const created = path.join(temp, 'new.tmp')
+  const failed = path.join(temp, 'failed.tmp')
+  const agent = makeAgent()
+  try {
+    const createdExec = { name: 'write', agent, arguments: { path: created } }
+    const failedExec = { name: 'write', agent, arguments: { path: failed } }
+    await host.call('tools/pre-execute', createdExec)
+    writeFileSync(created, 'x')
+    await host.call('tools/post-execute', createdExec, { isError: false })
+
+    await host.call('tools/pre-execute', failedExec)
+    await host.call('tools/post-execute', failedExec, { isError: true })
+
+    const value = await host.tools.get('postwork_cleanup').execute({ dryRun: true }, { agent })
+    assert.ok(value.kept.some((item) => item.path === created && item.reason.includes('dryRun')))
+    assert.ok(!value.kept.some((item) => item.path === failed))
+  } finally {
+    rmSync(temp, { recursive: true, force: true })
+  }
+})
+
+check('move tracking records only the destination, not the source', async () => {
+  const host = makeHost()
+  apply(host.ctx, {})
+  const temp = mkdtempSync(path.join(os.tmpdir(), 'pg-test-'))
+  const source = path.join(temp, 'source.txt')
+  const destination = path.join(temp, 'destination.txt')
+  writeFileSync(source, 'x')
+  const agent = makeAgent()
+  try {
+    const moveExec = {
+      name: 'move_file',
+      agent,
+      arguments: { source, destination },
+    }
+    await host.call('tools/pre-execute', moveExec)
+    writeFileSync(destination, 'x')
+    await host.call('tools/post-execute', moveExec, { isError: false })
+
+    const value = await host.tools.get('postwork_cleanup').execute({ dryRun: true }, { agent })
+    assert.ok(value.kept.some((item) => item.path === destination && item.reason.includes('dryRun')))
+    assert.ok(!value.kept.some((item) => item.path === source))
+  } finally {
+    rmSync(temp, { recursive: true, force: true })
+  }
+})
+
+check('postwork_cleanup dryRun is free but a real cleanup is gated', async () => {
+  const host = makeHost({ approval: 'rejected' })
+  apply(host.ctx, {})
+  const agent = makeAgent()
+  const dry = await host.call('tools/pre-execute', {
+    name: 'postwork_cleanup',
+    agent,
+    arguments: { dryRun: true },
+  })
+  assert.deepEqual(dry, { kind: 'allow' })
+  assert.equal(host.approvalRequests.length, 0)
+  const real = await host.call('tools/pre-execute', {
+    name: 'postwork_cleanup',
+    agent,
+    arguments: {},
+  })
+  assert.equal(real.kind, 'deny')
+  assert.equal(host.approvalRequests.length, 1)
 })
 
 let failed = 0

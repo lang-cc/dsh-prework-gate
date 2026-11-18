@@ -7,10 +7,12 @@
       config:
         enabled: true
         order: 400
-        strictness: strict
+        strictness: adaptive
         extraRules: []
         grill: true
         gate: true
+        gateMode: prompt-first
+        allowReadOnlyShell: true
         gatedTools: []
         approvalTtlMinutes: 120
         cleanup: true

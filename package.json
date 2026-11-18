@@ -1,8 +1,8 @@
 {
   "name": "dsh-prework-gate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Ask first, plan second, act third: a prompt gate plus a real brake on write tools, with one-round grilling and a postwork cleanup tool.",
+  "description": "Ask first, plan second, act third: a per-turn Host brake on write and command tools, with conservative cleanup and one-round grilling.",
   "type": "module",
   "license": "MIT",
   "keywords": [
