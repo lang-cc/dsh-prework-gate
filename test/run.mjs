@@ -50,7 +50,7 @@ function validateSchemaSubset(node, label, problems) {
   if (node.items !== undefined) validateSchemaSubset(node.items, `${label}[]`, problems)
 }
 
-function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'ask' } = {}) {
+function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'ask', cwd = process.cwd() } = {}) {
   const sections = []
   const tools = new Map()
   const listeners = new Map()
@@ -67,6 +67,7 @@ function makeHost({ approval = 'allowed-once', withApproval = true, policy = 'as
     systemPrompt: { section: (section) => sections.push(section) },
     tools: { register: (definition) => { tools.set(definition.name, definition) } },
     logger: { warn: (message) => warnings.push(message) },
+    get: (name) => name === 'workingDirectory' ? { get: () => cwd } : undefined,
     on: (event, listener) => {
       const bucket = listeners.get(event) ?? []
       bucket.push(listener)
@@ -394,6 +395,23 @@ check('move tracking records only the destination, not the source', async () => 
     assert.ok(!value.kept.some((item) => item.path === source))
   } finally {
     rmSync(temp, { recursive: true, force: true })
+  }
+})
+
+check('relative write paths resolve against the session working directory', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'pg-cwd-'))
+  const host = makeHost({ cwd: workspace })
+  apply(host.ctx, {})
+  const agent = makeAgent()
+  const exec = { name: 'write', agent, arguments: { file_path: 'relative.txt' } }
+  try {
+    await host.call('tools/pre-execute', exec)
+    writeFileSync(path.join(workspace, 'relative.txt'), 'x')
+    await host.call('tools/post-execute', exec, { isError: false })
+    const value = await host.tools.get('postwork_cleanup').execute({ dryRun: true }, { agent })
+    assert.ok(value.kept.some((item) => item.path === path.join(workspace, 'relative.txt') && item.reason.includes('dryRun')))
+  } finally {
+    rmSync(workspace, { recursive: true, force: true })
   }
 })
 

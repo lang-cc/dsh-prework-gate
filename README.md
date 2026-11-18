@@ -90,7 +90,7 @@ Removal uses the Windows Recycle Bin (`Microsoft.VisualBasic.FileIO`, `NoUI`) an
 node test/run.mjs
 ```
 
-Eighteen checks cover prompt blocks, tool schemas, per-turn re-arming, stale approvals, rejection/cancellation, `never` policy, both fail modes, shell classification, cleanup provenance/deliverable/backup protection, failed-write exclusion, move-destination tracking, and cleanup approval.
+Nineteen checks cover prompt blocks, tool schemas, per-turn re-arming, stale approvals, rejection/cancellation, `never` policy, both fail modes, shell classification, cleanup provenance/deliverable/backup protection, failed-write exclusion, move-destination tracking, relative-path resolution, and cleanup approval.
 
 ## Limitations
 

@@ -13,7 +13,7 @@
  */
 
 import { createGate, createPlanTool } from './lib/gate.js'
-import { createCleanupTool, createRegistry, trackToolCalls } from './lib/cleanup.js'
+import { createCleanupTool, createRegistry, sessionCwd, trackToolCalls } from './lib/cleanup.js'
 
 /** Highest-priority working rules. Positioned early (order 400) on purpose. */
 const BASE_RULES = `## 开工闸门 — 先问清、再出清单、批准后才动手（最高优先级工作规则）
@@ -117,7 +117,10 @@ export function apply(ctx, config) {
   }
   if (toolsAvailable && registry !== undefined) {
     trackToolCalls(ctx, registry)
-    ctx.tools.register(createCleanupTool(registry, { maxDelete: options.maxCleanupPerRun }))
+    ctx.tools.register(createCleanupTool(registry, {
+      maxDelete: options.maxCleanupPerRun,
+      cwdFor: (agent) => sessionCwd(ctx, agent),
+    }))
   }
 
   const parts = [BASE_RULES, mode]
