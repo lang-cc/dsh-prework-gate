@@ -59,7 +59,7 @@
 
 删除路径实现：
 
-- Windows 回收站通过 PowerShell `-EncodedCommand` 调 `Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(..., NoUI, SendToRecycleBin)`，避免中文路径经过 shell 拼接。
+- Windows 回收站通过 PowerShell `-EncodedCommand` 调 `Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(..., OnlyErrorDialogs, SendToRecycleBin)`，避免中文路径经过 shell 拼接。
 - 回退移动使用 Node `fs.mkdirSync`、`fs.renameSync`；跨盘 `EXDEV` 时用 `copyFileSync` + `unlinkSync`，不使用 `cmd /c move` 或外部 `mv`。
 - 子进程会检查 `error`、退出码和每个路径的结果，不会把无输出当成成功。
 

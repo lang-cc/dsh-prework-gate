@@ -74,7 +74,7 @@ guidance section (1000+). Raise it if you want the gate to be less prominent.
 - **Report only**: workspace files, modified files, `.bak` / `.old` / `.orig` backups, directories, files at or above 200 MB, and caller-supplied `paths`.
 - **Never auto-remove**: `present` deliverables, `.git`, symlinks/junctions, `~/.dsh`, common user-data folders, and system directories.
 
-Removal uses the Windows Recycle Bin (`Microsoft.VisualBasic.FileIO`, `NoUI`) and falls back to `%TEMP%\prework-gate-trash\<timestamp>-<random>\`. The fallback uses Node `fs` APIs rather than `cmd` or an external `mv`; failures leave the original in place and are reported.
+Removal uses the Windows Recycle Bin (`Microsoft.VisualBasic.FileIO`) and falls back to `%TEMP%\prework-gate-trash\<timestamp>-<random>\`. The fallback uses Node `fs` APIs rather than `cmd` or an external `mv`; failures leave the original in place and are reported.
 
 ## Command gate
 

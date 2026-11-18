@@ -74,7 +74,7 @@
 - **只报告、不删除**：工作区文件、修改过的文件、`.bak` / `.old` / `.orig` 备份、目录、超过 200MB 的文件，以及调用方通过 `paths` 临时传入的候选。
 - **永不自动删除**：`present` 登记过的交付物、`.git`、符号链接/junction、`~/.dsh` 配置与记忆库、常见用户数据目录和系统目录。
 
-删除优先使用 Windows 回收站（`Microsoft.VisualBasic.FileIO`，`NoUI`）；失败时退回 `%TEMP%\prework-gate-trash\<时间戳>-<随机后缀>\`。回退移动使用 Node `fs` API，不经过 `cmd` 或外部 `mv`，失败会保留原文件并报告。
+删除优先使用 Windows 回收站（`Microsoft.VisualBasic.FileIO`）；失败时退回 `%TEMP%\prework-gate-trash\<时间戳>-<随机后缀>\`。回退移动使用 Node `fs` API，不经过 `cmd` 或外部 `mv`，失败会保留原文件并报告。
 
 ## 命令闸门
 
